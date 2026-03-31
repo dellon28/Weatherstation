@@ -1,3 +1,11 @@
+
+#include <rom/rtc.h> 
+#include <math.h>  
+#include <ctype.h>
+
+
+#include <PubSubClient.h>
+
 #include <Wire.h>
 #include <SPI.h>
 #include <math.h>
@@ -7,10 +15,75 @@
 #include "Adafruit_ILI9341.h"
 #include <XPT2046_Touchscreen.h>
 
+#ifndef _WIFI_H 
+#include <WiFi.h>
+#endif
+
+#ifndef STDLIB_H
+#include <stdlib.h>
+#endif
+
+#ifndef STDIO_H
+#include <stdio.h>
+#endif
+
+#ifndef ARDUINO_H
+#include <Arduino.h>
+#endif 
+ 
+#ifndef ARDUINOJSON_H
+#include <ArduinoJson.h>
+#endif
+
+// MQTT CLIENT CONFIG  
+static const char* pubtopic      = "620169500";                    // Add your ID number here
+static const char* subtopic[]    = {"620169500_sub","/elet2415"};  // Array of Topics(Strings) to subscribe to
+static const char* mqtt_server   = "www.yanacreations.com";         // Broker IP address or Domain name as a String 
+static uint16_t mqtt_port        = 1883;
+
+// WIFI CREDENTIALS
+const char* ssid       = "MonaConnect";     // Add your Wi-Fi ssid
+const char* password   = ""; // Add your Wi-Fi password 
+
+
+
+// TASK HANDLES 
+TaskHandle_t xMQTT_Connect          = NULL; 
+TaskHandle_t xNTPHandle             = NULL;  
+TaskHandle_t xLOOPHandle            = NULL;  
+TaskHandle_t xUpdateHandle          = NULL;
+TaskHandle_t xButtonCheckeHandle    = NULL;  
+
+
+extern const char* subtopic[2];
+extern const char* mqtt_server;
+extern uint16_t mqtt_port;
+extern const char* ssid;
+extern const char* password;
+
+// FUNCTION DECLARATION   
+void checkHEAP(const char* Name);   // RETURN REMAINING HEAP SIZE FOR A TASK
+void initMQTT(void);                // CONFIG AND INITIALIZE MQTT PROTOCOL
+unsigned long getTimeStamp(void);   // GET 10 DIGIT TIMESTAMP FOR CURRENT TIME
+void callback(char* topic, byte* payload, unsigned int length);
+void initialize(void);
+bool publish(const char *topic, const char *payload); // PUBLISH MQTT MESSAGE(PAYLOAD) TO A TOPIC
+void vButtonCheck( void * pvParameters );
+void vUpdate( void * pvParameters );  
+bool isNumber(double number);
+
+#ifndef NTP_H
+#include "NTP.h"
+#endif
+
+#ifndef MQTT_H
+#include "mqtt.h"
+#endif
+
 // ── Pins ─────────────────────────────────────────────────────
 #define DHTPIN       2
 #define DHTTYPE      DHT22
-#define SOIL_PIN     4
+#define SOIL_PIN     32
 #define TFT_CS       5
 #define TFT_DC      17
 #define TFT_RST     16
@@ -46,6 +119,8 @@
 #define FRAME_MS        80
 #define SENSOR_MS     2000
 #define TOUCH_DEBOUNCE  300
+#define TOUCH_MIN_Z    1200
+#define SIMPLE_UI_MODE true
 #define LOVE_DECAY_MIN 10000UL
 #define LOVE_DECAY_MAX 20000UL
 
@@ -128,6 +203,20 @@
 #define C_Q2  0x07E0
 #define C_Q3  0xC81F
 
+// FUNCTION DECLARATION   
+void checkHEAP(const char* Name);   // RETURN REMAINING HEAP SIZE FOR A TASK
+void initMQTT(void);                // CONFIG AND INITIALIZE MQTT PROTOCOL
+unsigned long getTimeStamp(void);   // GET 10 DIGIT TIMESTAMP FOR CURRENT TIME
+void callback(char* topic, byte* payload, unsigned int length);
+void initialize(void);
+bool publish(const char *topic, const char *payload); // PUBLISH MQTT MESSAGE(PAYLOAD) TO A TOPIC
+void vButtonCheck( void * pvParameters );
+void vUpdate( void * pvParameters );  
+bool isNumber(double number);
+float convert_Celsius_to_fahrenheit(float celsius);      // Convert Celsius to Fahrenheit
+float convert_fahrenheit_to_Celsius(float fahrenheit);   // Convert Fahrenheit to Celsius
+float calcHeatIndex(float tempF, float humidity);        // Calculate heat index in Fahrenheit
+
 // ── Objects ──────────────────────────────────────────────────
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_BMP280 bmp;
@@ -185,6 +274,16 @@ bool floatChanged(float a, float b, float eps) {
   if (isnan(a) && isnan(b)) return false;
   if (isnan(a) || isnan(b)) return true;
   return fabsf(a - b) > eps;
+}
+
+int readSoilRaw() {
+  long acc = 0;
+  const int samples = 8;
+  for (int i = 0; i < samples; i++) {
+    acc += analogRead(SOIL_PIN);
+    delay(2);
+  }
+  return (int)(acc / samples);
 }
 
 void scheduleNextLoveDecay() {
@@ -783,6 +882,58 @@ void drawHomeScreen() {
   tft.setCursor(20,280); tft.print("XPT2046 TOUCH  |  v4.0");
 }
 
+void drawSimpleScreenFrame() {
+  tft.fillScreen(ILI9341_BLACK);
+  tft.drawRect(0, 0, 240, 320, C_CYAN);
+  tft.fillRect(0, 0, 240, 24, C_HEADER);
+  tft.setTextSize(2);
+  tft.setTextColor(C_WHITE);
+  tft.setCursor(8, 4);
+  tft.print("WEATHER LIVE");
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_LTGREY);
+  tft.setCursor(8, 30);  tft.print("Temp:");
+  tft.setCursor(8, 58);  tft.print("Humi:");
+  tft.setCursor(8, 86);  tft.print("Pres:");
+  tft.setCursor(8, 114); tft.print("Soil:");
+  tft.setCursor(8, 142); tft.print("Health:");
+  tft.setCursor(8, 170); tft.print("MQTT:");
+}
+
+void updateSimpleScreen() {
+  char line[32];
+
+  tft.fillRect(70, 28, 160, 160, ILI9341_BLACK);
+  tft.setTextSize(2);
+
+  tft.setTextColor(C_YELLOW);
+  snprintf(line, sizeof(line), "%5.1f C", sTemp);
+  tft.setCursor(70, 30); tft.print(line);
+
+  tft.setTextColor(C_CYAN);
+  snprintf(line, sizeof(line), "%5.1f %%", sHumi);
+  tft.setCursor(70, 58); tft.print(line);
+
+  tft.setTextColor(C_GREEN);
+  snprintf(line, sizeof(line), "%6.1f", sPres);
+  tft.setCursor(70, 86); tft.print(line);
+
+  float soilPct = soilPercentFromRaw(sSoil);
+  tft.setTextColor(C_ORANGE);
+  if (isnan(soilPct)) snprintf(line, sizeof(line), "NO DATA");
+  else snprintf(line, sizeof(line), "%5.0f %%", soilPct);
+  tft.setCursor(70, 114); tft.print(line);
+
+  tft.setTextColor(barColour(healthOverall()));
+  snprintf(line, sizeof(line), "%5.0f %%", healthOverall() * 100.0f);
+  tft.setCursor(70, 142); tft.print(line);
+
+  tft.setTextColor(mqtt.connected() ? C_GREEN : C_RED);
+  snprintf(line, sizeof(line), "%s", mqtt.connected() ? "CONNECTED" : "OFFLINE");
+  tft.setCursor(70, 170); tft.print(line);
+}
+
 
 // ════════════════════════════════════════════════════════════
 //  FULL GAME SCENE REDRAW
@@ -808,7 +959,8 @@ void redrawGameScene() {
 bool handleTouch() {
   if(!touch.touched()) return false;
   TS_Point p=touch.getPoint();
-  if(p.z<600) return false;
+  if(p.z<TOUCH_MIN_Z) return false;
+  if(p.x < TS_MINX || p.x > TS_MAXX || p.y < TS_MINY || p.y > TS_MAXY) return false;
 
   unsigned long now=millis();
   if(now-lastTouchMs<TOUCH_DEBOUNCE) return false;
@@ -856,9 +1008,19 @@ void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));
 
+  // Keep both CS lines deasserted while peripherals initialize on shared SPI bus.
+  pinMode(TFT_CS, OUTPUT);
+  pinMode(TOUCH_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TOUCH_CS, HIGH);
+
   tft.begin(); tft.setRotation(0); tft.fillScreen(C_BG);
   touch.begin(); touch.setRotation(0);
   dht.begin();
+
+  pinMode(SOIL_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(SOIL_PIN, ADC_11db);
 
   if(!bmp.begin(0x76)) {
     bmpAvailable = false;
@@ -874,9 +1036,17 @@ void setup() {
 
   for(int i=0;i<MAX_HEARTS;i++) hearts[i].active=false;
 
-  drawHomeScreen();
+  if (SIMPLE_UI_MODE) {
+    currentScreen = SCR_GAME;
+    drawSimpleScreenFrame();
+    updateSimpleScreen();
+  } else {
+    drawHomeScreen();
+  }
   lastFrameMs=lastSensorMs=lastLoveDecay=millis();
   scheduleNextLoveDecay();
+
+  initialize();
 }
 
 
@@ -885,6 +1055,28 @@ void setup() {
 // ════════════════════════════════════════════════════════════
 void loop() {
   unsigned long now=millis();
+
+  if (SIMPLE_UI_MODE) {
+    if(now-lastSensorMs>=SENSOR_MS){
+      lastSensorMs=now;
+      float h=dht.readHumidity(), t=dht.readTemperature();
+      sHumi = isnan(h) ? NAN : h;
+      sTemp = isnan(t) ? NAN : t;
+
+      if (bmpAvailable) {
+        float p = bmp.readPressure()/100.0f;
+        sPres = (isnan(p) || p < 300.0f || p > 1200.0f) ? NAN : p;
+      } else {
+        sPres = NAN;
+      }
+
+      int rawSoil = readSoilRaw();
+      sSoil = (int)(0.75f * (float)sSoil + 0.25f * (float)rawSoil);
+      Serial.printf("SIMPLE UI | T:%.1f H:%.1f P:%.1f S:%d\n", sTemp,sHumi,sPres,sSoil);
+      updateSimpleScreen();
+    }
+    return;
+  }
 
   if(handleTouch()) return;
 
@@ -954,7 +1146,8 @@ void loop() {
       sPres = NAN;
     }
 
-    sSoil=analogRead(SOIL_PIN);
+    int rawSoil = readSoilRaw();
+    sSoil = (int)(0.75f * (float)sSoil + 0.25f * (float)rawSoil);
     Serial.printf("T:%.1f H:%.1f P:%.1f S:%d Love:%.0f Health:%.0f%%\n",
                   sTemp,sHumi,sPres,sSoil,love,healthOverall()*100.0f);
 
@@ -968,5 +1161,206 @@ void loop() {
 
     float nh=healthOverall();
     if(floatChanged(nh,lastHealthDrawn,0.005f)){ drawHealthBar(true); lastHealthDrawn=nh; }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  TEMPERATURE CONVERSION FUNCTIONS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @brief Convert Celsius to Fahrenheit
+ * @param celsius Temperature in Celsius
+ * @return Temperature in Fahrenheit
+ */
+float convert_Celsius_to_fahrenheit(float celsius) {
+  return (celsius * 9.0f / 5.0f) + 32.0f;
+}
+
+/**
+ * @brief Convert Fahrenheit to Celsius
+ * @param fahrenheit Temperature in Fahrenheit
+ * @return Temperature in Celsius
+ */
+float convert_fahrenheit_to_Celsius(float fahrenheit) {
+  return (fahrenheit - 32.0f) * 5.0f / 9.0f;
+}
+
+/**
+ * @brief Calculate heat index in Fahrenheit
+ * @param tempF Temperature in Fahrenheit
+ * @param humidity Relative humidity percentage (0-100)
+ * @return Heat index in Fahrenheit
+ */
+float calcHeatIndex(float tempF, float humidity) {
+  // Heat Index calculated in Fahrenheit
+  // NOAA formula for heat index
+  float c1 = -42.379f;
+  float c2 = 2.04901523f;
+  float c3 = 10.14333127f;
+  float c4 = -0.22475541f;
+  float c5 = -0.00683783f;
+  float c6 = -0.05481717f;
+  float c7 = 0.00122874f;
+  float c8 = 0.00085282f;
+  float c9 = -0.00000199f;
+
+  float hi = c1 + (c2 * tempF) + (c3 * humidity) + (c4 * tempF * humidity) +
+             (c5 * tempF * tempF) + (c6 * humidity * humidity) +
+             (c7 * tempF * tempF * humidity) + (c8 * tempF * humidity * humidity) +
+             (c9 * tempF * tempF * humidity * humidity);
+
+  return hi;
+}
+
+// ════════════════════════════════════════════════════════════
+//  UTILITY FUNCTIONS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @brief Check if a double number is valid (not NaN, not Infinity)
+ * @param number The number to check
+ * @return true if valid, false if NaN or Infinity
+ */
+bool isNumber(double number){       
+  char item[20];
+  snprintf(item, sizeof(item), "%f\n", number);
+  if( isdigit(item[0]) )
+    return true;
+  return false; 
+} 
+
+/**
+ * @brief Get current timestamp from NTP
+ * @return unsigned long timestamp representing current time
+ */
+unsigned long getTimeStamp(void) {
+  // RETURNS 10 DIGIT TIMESTAMP REPRESENTING CURRENT TIME
+  time_t now;         
+  time(&now); // Retrieve time[Timestamp] from system and save to &now variable
+  return now;
+}
+
+
+/**
+ * @brief Publish message to MQTT topic
+ * @param topic MQTT topic to publish to
+ * @param payload Message payload
+ * @return true if publish successful, false otherwise
+ */
+bool publish(const char *topic, const char *payload){   
+  bool res = false;
+  try{
+    res = mqtt.publish(topic,payload);
+    // Serial.printf("\nres : %d\n",res);
+    if(!res){
+      res = false;
+      throw false;
+    }
+  }
+  catch(...){
+  Serial.printf("\nError (%d) >> Unable to publish message\n", res);
+  }
+  return res;
+}
+
+/**
+ * @brief MQTT callback function - handles received messages on subscribed topics
+ * @param topic MQTT topic of received message
+ * @param payload Message payload bytes
+ * @param length Length of payload
+ */
+void callback(char* topic, byte* payload, unsigned int length) {
+  // ############## MQTT CALLBACK  ######################################
+  // RUNS WHENEVER A MESSAGE IS RECEIVED ON A TOPIC SUBSCRIBED TO
+  
+  Serial.printf("\nMessage received : ( topic: %s ) \n",topic );
+
+  char received[256] = {0};
+  if (length >= sizeof(received)) {
+    Serial.println("Payload too large, dropping message");
+    return;
+  }
+
+  for (unsigned int i = 0; i < length; i++) {
+    received[i] = (char)payload[i];
+  }
+
+  // PRINT RECEIVED MESSAGE
+  Serial.printf("Payload : %s \n",received);
+
+ 
+  // CONVERT MESSAGE TO JSON
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, received);  
+
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+}
+
+
+/**
+ * @brief Task for button checking/touch input handling
+ * @param pvParameters Task parameter (unused)
+ */
+void vButtonCheck( void * pvParameters ) {
+  configASSERT( ( ( uint32_t ) pvParameters ) == 1 );
+  
+  for ( ;; ) {
+    handleTouch();
+    vTaskDelay(50 / portTICK_PERIOD_MS);  // Check every 50ms
+  }
+}
+
+/**
+ * @brief Task for updating sensor data and publishing to MQTT
+ * Reads temperature, humidity, pressure, and soil moisture from all sensors and publishes JSON formatted data
+ * @param pvParameters Task parameter (unused)
+ */
+void vUpdate( void * pvParameters ) {
+  configASSERT( ( ( uint32_t ) pvParameters ) == 1 );
+  
+  for ( ;; ) {
+    // Use values sampled in loop() to avoid duplicate sensor reads across tasks.
+    float t = sTemp;
+    float h = sHumi;
+    float p = sPres;
+    int soil = sSoil;
+    float soilPct = soilPercentFromRaw(soil);
+    
+    // Check if temperature reading is valid
+    if(isNumber(t)){
+      // Publish update according to schema:
+      // {"id": "student_id", "timestamp": 1702212234, "temperature": 30, "humidity":90, "pressure": 1013.25, "soil": 65, "heatindex": 30}
+
+      // 1. Create JSON object
+      StaticJsonDocument<256> doc; // Create JSON object
+      
+      // 2. Create message buffer/array to store serialized JSON object
+      char message[256] = {0};
+      
+      // 3. Add key:value pairs to JSON object based on schema
+      doc["id"]           = "620169500"; // Add your ID number here
+      doc["timestamp"]    = getTimeStamp();
+      doc["temperature"]  = t;
+      doc["humidity"]     = h;
+      doc["pressure"]     = isNumber(p) ? p : 0;  // Add pressure (or 0 if invalid)
+      doc["soil"]         = soilPct;               // Add soil moisture percentage
+      doc["heatindex"]    = convert_fahrenheit_to_Celsius(calcHeatIndex(convert_Celsius_to_fahrenheit(t), h));
+
+      // 4. Serialize / Convert JSON object to JSON string and store in message array
+      serializeJson(doc, message);
+        
+      // 5. Publish message to a topic subscribed to by both backend and frontend
+      if(mqtt.connected()){
+        publish(pubtopic, message);
+        Serial.printf("Sensor Data: T=%.2f C, H=%.2f%%, P=%.2f hPa, Soil=%.2f%%\n", t, h, isNumber(p) ? p : 0, soilPct);
+      }              
+    }
+       
+    vTaskDelay(1000 / portTICK_PERIOD_MS);  
   }
 }
