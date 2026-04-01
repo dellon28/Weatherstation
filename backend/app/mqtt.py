@@ -91,7 +91,7 @@ class MQTT:
             payload = msg.payload.decode("utf-8")
             
             print(payload) # UNCOMMENT WHEN DEBUGGING
-            # ADD YOUR CODE HERE TO PROCESS MESSAGE
+            # Parse the sensor JSON and persist the reading in MongoDB.
             update = loads(payload) # CONVERT FROM JSON STRING TO JSON OBJECT
             inserted = self.mongo.addUpdate(update) # INSERT INTO DATABASE
             if inserted:

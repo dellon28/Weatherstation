@@ -16,7 +16,7 @@ export const useAppStore =  defineStore('app', ()=>{
 
     // ACTIONS
     const getAllInRange = async (start,end)=>{
-        // FETCH REQUEST WILL TIMEOUT AFTER 20 SECONDS
+        // Fetch historical sensor readings between two Unix timestamps.
         const controller = new AbortController();
         const signal = controller.signal;
         const id = setTimeout(()=>{controller.abort()},60000);
@@ -48,7 +48,7 @@ export const useAppStore =  defineStore('app', ()=>{
     }
 
     const getTemperatureMMAR = async (start,end)=>{
-        // FETCH REQUEST WILL TIMEOUT AFTER 20 SECONDS
+        // Fetch min, max, average, and range for temperature in a time window.
         const controller = new AbortController();
         const signal = controller.signal;
         const id = setTimeout(()=>{controller.abort()},60000);
@@ -80,7 +80,7 @@ export const useAppStore =  defineStore('app', ()=>{
     }
 
     const getHumidityMMAR = async (start,end)=>{
-        // FETCH REQUEST WILL TIMEOUT AFTER 20 SECONDS
+        // Fetch min, max, average, and range for humidity in a time window.
         const controller = new AbortController();
         const signal = controller.signal;
         const id = setTimeout(()=>{controller.abort()},60000);
@@ -112,7 +112,7 @@ export const useAppStore =  defineStore('app', ()=>{
     }
 
     const getFreqDistro = async (variable,start,end)=>{
-        // FETCH REQUEST WILL TIMEOUT AFTER 20 SECONDS
+        // Fetch a frequency distribution for a selected variable.
         const controller = new AbortController();
         const signal = controller.signal;
         const id = setTimeout(()=>{controller.abort()},60000);
@@ -144,6 +144,7 @@ export const useAppStore =  defineStore('app', ()=>{
     }
 
     const getLatest = async ()=>{
+        // Fetch the most recent reading so the UI can show live values.
         const controller = new AbortController();
         const signal = controller.signal;
         const id = setTimeout(()=>{controller.abort()},60000);

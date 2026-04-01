@@ -18,7 +18,7 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
     const mqtt              = ref(null);
     const host              = ref("www.yanacreations.com");  // Host Name or IP address
     const port              = ref(9002);  // Port number
-    const payload           = ref({"id": "620169500_sub", "timestamp": 1702212234, "temperature": 30, "humidity": 90, "heatindex": 30}); // Set initial values for payload
+    const payload           = ref({"id": "620169500_sub", "timestamp": 1702212234, "temperature": 30, "humidity": 90, "heatindex": 30}); // Default shape keeps the UI from reading undefined fields.
     const payloadTopic      = ref("");
     const subTopics         = ref({});
  
@@ -32,7 +32,7 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
     }
 
     const onConnected = (reconnect,URI)=> {
-        // called when a connection is successfully made to the server. after a connect() method.
+        // Re-subscribe to active topics after a reconnect so live charts keep updating.
         console.log(`Connected to: ${URI} , Reconnect: ${reconnect}`);      
         const topics = Object.keys(subTopics.value);
         if(topics.length > 0 ){
@@ -59,8 +59,8 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
         console.log(`MQTT: Connection to ${host} failed. \nError message : ${response.errorMessage}`);                  
         };
     
-    const onMessageArrived = (response) => {
-           // called when a message has arrived in this Paho.MQTT.client.
+        const onMessageArrived = (response) => {
+            // Store the latest topic and parsed JSON payload for Vue watchers.
            try {
             payload.value       = JSON.parse(response.payloadString); 
             payloadTopic.value  = response.destinationName;
@@ -96,7 +96,7 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
         }
 
     const subscribe = (topic) => {
-        // Subscribe for messages, request receipt of a copy of messages sent to the destinations described by the filter.
+        // Track the topic locally so it can be restored after reconnects.
         subTopics.value[topic] = "pending";
 
         if (!mqtt.value || !mqtt.value.isConnected?.()) {
@@ -149,6 +149,7 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
 
     // PUBLISH UTIL FUNCTION
     const publish = (topic, payload) => {
+        // Send commands or control messages back to the MQTT broker.
         const PahoMQTT = globalThis?.Paho?.MQTT;
         if (!mqtt.value || !PahoMQTT?.Message) {
             console.warn('MQTT: publish skipped. Paho MQTT client is not ready.');
@@ -169,6 +170,7 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
  
 
     const connect = ()=> {
+        // Create the browser MQTT client and attach message and reconnect handlers.
         const PahoMQTT = globalThis?.Paho?.MQTT;
         if (!PahoMQTT?.Client) {
             console.warn('MQTT: Paho client is not loaded. Skipping connect().');

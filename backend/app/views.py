@@ -32,6 +32,7 @@ def get_all(start,end):
     if request.method == "GET":
         '''Add your code here to complete this route'''
         try:
+            # The frontend sends Unix timestamps and expects a JSON status envelope back.
             START = escape(start)
             END = escape(end)
             data = mongo.getAllInRange(START, END)
@@ -52,6 +53,7 @@ def get_latest():
    
     if request.method == "GET":
         try:
+            # Used by the live dashboard to refresh the newest sensor sample.
             data = mongo.getLatest()
             if data:
                 return jsonify({"status":"found","data": data})
@@ -70,6 +72,7 @@ def get_temperature_mmar(start,end):
     if request.method == "GET": 
         '''Add your code here to complete this route'''
         try:
+            # The frontend uses this for summary statistics and chart analytics.
             START = escape(start)
             END = escape(end)
             temperature_mmar = mongo.temperatureMMAR(START, END)
@@ -93,6 +96,7 @@ def get_humidity_mmar(start,end):
     if request.method == "GET": 
         '''Add your code here to complete this route'''
         try:
+            # Matches the temperature MMAR endpoint but for humidity analytics.
             START = escape(start)
             END = escape(end)
             humidity_mmar = mongo.humidityMMAR(START, END)
@@ -116,6 +120,7 @@ def get_freq_distro(variable,start,end):
     if request.method == "GET": 
         '''Add your code here to complete this route'''
         try:
+            # Supports histogram-style analysis for a chosen sensor variable.
             VARIABLE = escape(variable)
             START = escape(start)
             END = escape(end)
