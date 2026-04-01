@@ -28,7 +28,9 @@ const route = useRoute();
 const navItems = [
   { name: 'Dashboard', label: 'Dashboard' },
   { name: 'Analysis', label: 'Analysis' },
+  { name: 'Live', label: 'Live' },
   { name: 'Control', label: 'Control' },
+  {name: 'Home', label: 'Home'}
 ];
 
 const goTo = (routeName) => {

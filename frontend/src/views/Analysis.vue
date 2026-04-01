@@ -85,6 +85,23 @@
             </v-card>
           </v-col>
 
+          <!-- Altitude Card -->
+          <v-col cols="6" md="12">
+            <v-card class="pixel-card pa-4 mb-4 metric-altitude">
+              <div class="d-flex justify-space-between align-start">
+                <div class="pixel-label">ALTITUDE</div>
+                <select v-model="altitudeUnit" class="pixel-dropdown">
+                  <option value="m">m</option>
+                  <option value="ft">ft</option>
+                </select>
+              </div>
+              <div class="d-flex align-end">
+                <span class="pixel-value-sm">{{ displayAltitude }}</span>
+                <span class="pixel-unit-sm ml-1 mb-1">{{ altitudeUnit }}</span>
+              </div>
+            </v-card>
+          </v-col>
+
           <!-- Heat Index Card -->
           <v-col cols="6" md="12">
             <v-card class="pixel-card pa-4 metric-heat">
@@ -122,6 +139,7 @@
           <div class="tank-info pa-6">
             <div class="pixel-font-sm text-white mb-1">SOIL MOISTURE</div>
             <div class="mono-font text-blue-lighten-4">Volumetric Water Content</div>
+            <div class="pixel-font-xs text-blue-lighten-4 mt-2">LIVE MQTT READOUT</div>
             <div class="percentage-display">
               <span class="val pixel-font">{{ soilMoisture }}</span>
               <span class="unit pixel-font-sm">%</span>
@@ -132,9 +150,6 @@
               <span class="mark-label mono-font">{{ mark }}%</span>
               <div class="mark-line"></div>
             </div>
-          </div>
-          <div class="slider-control">
-            <input type="range" v-model="soilMoisture" min="0" max="100" class="vertical-slider">
           </div>
         </v-card>
       </v-col>
@@ -174,12 +189,14 @@ import Highcharts from 'highcharts';
 
 const Mqtt = useMqttStore();
 const AppStore = useAppStore();
+const LIVE_TOPICS = ['620169500', '620169500_pub', '620169500_sub'];
 
 // Units
 const tempUnit = ref("°C");
 const humidUnit = ref("%");
 const pressureUnit = ref("hPa");
 const heatUnit = ref("°C");
+const altitudeUnit = ref("m");
 
 // Data
 const start = ref("");
@@ -188,15 +205,92 @@ const soilMoisture = ref(0);
 const temperature = ref(0);
 const humidity = ref(0);
 const pressure = ref(1013.25);
+const heatIndex = ref(0);
+const altitude = ref(0);
 const readings = ref([]);
+
+const clampPercent = (value) => Math.max(0, Math.min(100, value));
+
+const resolveSoilPercent = (raw) => {
+  const directPercent = Number(raw?.soil ?? raw?.soil_moisture ?? raw?.soilPercent ?? raw?.soil_percent);
+  if (Number.isFinite(directPercent)) {
+    return clampPercent(directPercent);
+  }
+
+  const adcValue = Number(raw?.soil_adc ?? raw?.adc ?? NaN);
+  if (Number.isFinite(adcValue)) {
+    return clampPercent(((4095 - adcValue) / 4095) * 100);
+  }
+
+  return 0;
+};
+
+const calculateAltitudeM = (pressureHpa, seaLevelHpa = 1013.25) => {
+  const pressureValue = Number(pressureHpa);
+  const seaLevelValue = Number(seaLevelHpa);
+
+  if (!pressureValue || !Number.isFinite(pressureValue) || !Number.isFinite(seaLevelValue) || seaLevelValue <= 0) {
+    return 0;
+  }
+
+  return 44330 * (1 - Math.pow(pressureValue / seaLevelValue, 1 / 5.255));
+};
+
+const normalizeReading = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const reading = {
+    timestamp: Number(raw.timestamp ?? Math.floor(Date.now() / 1000)),
+    temperature: Number(raw.temperature ?? 0),
+    humidity: Number(raw.humidity ?? 0),
+    pressure: Number(raw.pressure ?? 1013.25),
+    heatindex: Number(raw.heatindex ?? raw.heat_index ?? NaN),
+    soilPercent: resolveSoilPercent(raw),
+  };
+
+  if (!Number.isFinite(reading.timestamp)) reading.timestamp = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(reading.temperature)) reading.temperature = 0;
+  if (!Number.isFinite(reading.humidity)) reading.humidity = 0;
+  if (!Number.isFinite(reading.pressure)) reading.pressure = 1013.25;
+  if (!Number.isFinite(reading.heatindex)) reading.heatindex = NaN;
+  if (!Number.isFinite(reading.soilPercent)) reading.soilPercent = 0;
+
+  return reading;
+};
+
+const syncDerivedMetrics = () => {
+  altitude.value = calculateAltitudeM(pressure.value);
+};
+
+const applyLiveReading = (topic, payload) => {
+  if (!topic || !LIVE_TOPICS.includes(topic)) return;
+
+  const reading = normalizeReading(payload);
+  if (!reading) return;
+
+  temperature.value = reading.temperature;
+  humidity.value = reading.humidity;
+  pressure.value = reading.pressure;
+  heatIndex.value = Number.isFinite(reading.heatindex)
+    ? reading.heatindex
+    : calculateHeatIndexC(reading.temperature, reading.humidity);
+  soilMoisture.value = reading.soilPercent;
+  syncDerivedMetrics();
+};
 
 const fetchLatest = async () => {
   const data = await AppStore.getLatest()
   if (data && Object.keys(data).length > 0) {
-    temperature.value = data.temperature ?? 0
-    humidity.value = data.humidity ?? 0
-    pressure.value = data.pressure ?? 1013.25
-    soilMoisture.value = data.soil_adc ?? 0
+    const reading = normalizeReading(data);
+    if (!reading) return;
+    temperature.value = reading.temperature;
+    humidity.value = reading.humidity;
+    pressure.value = reading.pressure;
+    heatIndex.value = Number.isFinite(reading.heatindex)
+      ? reading.heatindex
+      : calculateHeatIndexC(reading.temperature, reading.humidity);
+    soilMoisture.value = reading.soilPercent;
+    syncDerivedMetrics();
   }
 }
 
@@ -207,11 +301,6 @@ const toUnixSeconds = (dateValue, endOfDay = false) => {
     : new Date(`${dateValue}T00:00:00`);
   if (Number.isNaN(date.getTime())) return null;
   return Math.floor(date.getTime() / 1000);
-};
-
-const soilAdcToPercent = (adc) => {
-  const raw = Number(adc ?? 0);
-  return Math.max(0, Math.min(100, ((4095 - raw) / 4095) * 100));
 };
 
 const fetchAnalysisData = async () => {
@@ -232,12 +321,15 @@ const fetchAnalysisData = async () => {
     temperature.value = Number(latest.temperature ?? 0);
     humidity.value = Number(latest.humidity ?? 0);
     pressure.value = Number(latest.pressure ?? 1013.25);
-    soilMoisture.value = soilAdcToPercent(latest.soil_adc);
+    heatIndex.value = Number.isFinite(Number(latest.heatindex ?? latest.heat_index))
+      ? Number(latest.heatindex ?? latest.heat_index)
+      : calculateHeatIndexC(Number(latest.temperature ?? 0), Number(latest.humidity ?? 0));
+    soilMoisture.value = resolveSoilPercent(latest);
+    syncDerivedMetrics();
     return;
   }
 
   await fetchLatest();
-  soilMoisture.value = soilAdcToPercent(soilMoisture.value);
 };
 
 // Converters
@@ -255,16 +347,40 @@ const displayPressure = computed(() => {
   return pressure.value.toFixed(1);
 });
 
-const calculateHeatIndexC = (T_c, rh) => {
-  const T = T_c * 1.8 + 32;
-  if (T < 80) return T_c;
-  const HI_F = -42.379 + 2.04901523 * T + 10.14333127 * rh - 0.22475541 * T * rh - 0.00683783 * T * T - 0.05481717 * rh * rh + 0.00122874 * T * T * rh + 0.00085282 * T * rh * rh - 0.00199 * T * T * rh * rh;
-  return (HI_F - 32) / 1.8;
+const displayAltitude = computed(() => {
+  if (altitudeUnit.value === 'ft') {
+    return (altitude.value * 3.28084).toFixed(1);
+  }
+  return altitude.value.toFixed(1);
+});
+
+const calculateHeatIndexC = (tempC, rh) => {
+  const tempF = tempC * 1.8 + 32;
+  const humidityPct = Math.max(0, Math.min(100, Number(rh ?? 0)));
+
+  if (tempF < 80 || humidityPct < 40) {
+    return tempC;
+  }
+
+  let hiF = -42.379 + (2.04901523 * tempF) + (10.14333127 * humidityPct)
+    - (0.22475541 * tempF * humidityPct)
+    - (0.00683783 * tempF * tempF)
+    - (0.05481717 * humidityPct * humidityPct)
+    + (0.00122874 * tempF * tempF * humidityPct)
+    + (0.00085282 * tempF * humidityPct * humidityPct)
+    - (0.00000199 * tempF * tempF * humidityPct * humidityPct);
+
+  if (humidityPct < 13 && tempF >= 80 && tempF <= 112) {
+    hiF -= ((13 - humidityPct) / 4) * Math.sqrt((17 - Math.abs(tempF - 95)) / 17);
+  } else if (humidityPct > 85 && tempF >= 80 && tempF <= 87) {
+    hiF += ((humidityPct - 85) / 10) * ((87 - tempF) / 5);
+  }
+
+  return (hiF - 32) / 1.8;
 };
 
 const displayHeatIndex = computed(() => {
-  const hiCelsius = calculateHeatIndexC(temperature.value, humidity.value);
-  return convertTemp(hiCelsius, heatUnit.value).toFixed(1);
+  return convertTemp(heatIndex.value, heatUnit.value).toFixed(1);
 });
 
 // 3D Visuals
@@ -331,12 +447,15 @@ const initThreeJS = () => {
 const initCharts = () => {
   const soilSeries = readings.value.map((r) => [
     Number(r.timestamp ?? 0) * 1000,
-    soilAdcToPercent(r.soil_adc)
+    resolveSoilPercent(r)
   ]);
   const heatSeries = readings.value.map((r) => {
     const t = Number(r.temperature ?? 0);
     const h = Number(r.humidity ?? 0);
-    return [Number(r.timestamp ?? 0) * 1000, convertTemp(calculateHeatIndexC(t, h), heatUnit.value)];
+    const hiC = Number.isFinite(Number(r.heatindex ?? r.heat_index))
+      ? Number(r.heatindex ?? r.heat_index)
+      : calculateHeatIndexC(t, h);
+    return [Number(r.timestamp ?? 0) * 1000, convertTemp(hiC, heatUnit.value)];
   });
   const tempSeries = readings.value.map((r) => [
     Number(r.timestamp ?? 0) * 1000,
@@ -400,13 +519,24 @@ const performAnalysis = async () => {
 onMounted(() => {
   initThreeJS();
   Mqtt.connect();
+  LIVE_TOPICS.forEach((topic) => Mqtt.subscribe(topic));
   performAnalysis();
+  syncDerivedMetrics();
 });
 
 onBeforeUnmount(() => {
+  Mqtt.unsubcribeAll();
   cancelAnimationFrame(animFrameId);
   renderer?.dispose();
 });
+
+watch(
+  () => [Mqtt.payloadTopic, Mqtt.payload],
+  ([topic, payload]) => {
+    applyLiveReading(topic, payload);
+  },
+  { deep: true }
+);
 </script>
 
 <style scoped>
@@ -461,6 +591,7 @@ onBeforeUnmount(() => {
 .metric-temp { background-color: #E05C5C !important; }
 .metric-humid { background-color: #5B9EF0 !important; }
 .metric-pressure { background-color: #9B6ECF !important; }
+.metric-altitude { background-color: #6C8CD5 !important; }
 .metric-heat { background-color: #E0A020 !important; }
 
 .tank-container { height: 550px; background: #2b1d16; position: relative; border: 3px solid #3A2540 !important; }

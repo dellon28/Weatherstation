@@ -16,16 +16,10 @@
           />
         </div>
 
-        <h1 class="title mb-2">PLANT-A-GOTCHI</h1>
+        <h1 class="title mb-2">GROWup</h1>
         <p class="subtitle mb-6">Your weather companion is ready to start.</p>
 
-        <div v-if="!started" class="d-flex justify-center">
-          <v-btn class="pixel-btn" color="secondary" size="large" @click="started = true">
-            Press Start
-          </v-btn>
-        </div>
-
-        <div v-else class="name-panel">
+        <div class="name-panel mt-5">
           <v-text-field
             v-model="petName"
             class="pixel-input"
@@ -34,9 +28,9 @@
             density="comfortable"
             maxlength="16"
             hide-details
-            @keyup.enter="confirmName"
+            @keyup.enter="goToDashboard"
           />
-          <v-btn class="pixel-btn mt-4" color="primary" block @click="confirmName">Confirm</v-btn>
+          <v-btn class="pixel-btn mt-4" color="primary" block @click="goToDashboard">Go To Dashboard</v-btn>
         </div>
       </div>
     </div>
@@ -44,25 +38,42 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import bitLoveTrack from '@/assets/8 Bit Love! Happy Fun Chiptune Game Music by HeatleyBros.mp3'
 
 const router = useRouter()
 const wifiConnected = ref(true)
 const mqttConnected = ref(false)
-const started = ref(false)
 const petName = ref('')
+let bgm
 
-const plantAnimationClass = computed(() => (started.value ? 'bounce' : 'sway'))
+const plantAnimationClass = computed(() => 'bounce')
 
-function confirmName() {
+function goToDashboard() {
   const trimmed = petName.value.trim()
-  if (!trimmed) return
-
-  localStorage.setItem('plantName', trimmed)
+  if (trimmed) {
+    localStorage.setItem('plantName', trimmed)
+  }
   mqttConnected.value = true
   router.push('/dashboard')
 }
+
+onMounted(() => {
+  bgm = new Audio(bitLoveTrack)
+  bgm.loop = true
+  bgm.volume = 0.35
+
+  bgm.play().catch(() => {
+    // Browser may block autoplay until user interaction.
+  })
+})
+
+onUnmounted(() => {
+  if (!bgm) return
+  bgm.pause()
+  bgm.currentTime = 0
+})
 </script>
 
 <style scoped>

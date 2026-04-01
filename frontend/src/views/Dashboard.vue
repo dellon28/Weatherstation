@@ -127,12 +127,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/store/appStore'
+import { useMqttStore } from '@/store/mqttStore'
 
 const route = useRoute()
 const AppStore = useAppStore()
+const MqttStore = useMqttStore()
+const LIVE_TOPICS = ['620169500', '620169500_pub', '620169500_sub']
 
 const savedName = localStorage.getItem('plantName')
 const petName = ref(route.query.name || savedName || 'Sprout')
@@ -154,7 +157,7 @@ const handlePetClick = () => {
   stats.love = Math.min(100, stats.love + 2)
   stats.xp += 1
   
-  const phrases = ['*Wiggle*', 'Yay!', '<3', 'Purr...', 'UWU', 'Soft!']
+  const phrases = ['Lets go!', 'Yay!', '<3', 'Howdie', 'UWU', 'Soft!']
   speechBubble.value = phrases[Math.floor(Math.random() * phrases.length)]
   
   setTimeout(() => { isHappy.value = false }, 500)
@@ -235,10 +238,49 @@ const sensors = computed(() => {
 const latestData = ref({})
 const history = reactive([])
 
+const normalizeReading = (raw) => {
+  if (!raw || typeof raw !== 'object') return null
+
+  const reading = {
+    timestamp: Number(raw.timestamp ?? Math.floor(Date.now() / 1000)),
+    temperature: Number(raw.temperature ?? 0),
+    humidity: Number(raw.humidity ?? 0),
+    heatindex: Number(raw.heatindex ?? 0),
+    soil_adc: Number(raw.soil_adc ?? raw.soil ?? 0),
+    pressure: Number(raw.pressure ?? 1013),
+  }
+
+  if (!Number.isFinite(reading.timestamp)) reading.timestamp = Math.floor(Date.now() / 1000)
+  if (!Number.isFinite(reading.temperature)) reading.temperature = 0
+  if (!Number.isFinite(reading.humidity)) reading.humidity = 0
+  if (!Number.isFinite(reading.heatindex)) reading.heatindex = 0
+  if (!Number.isFinite(reading.soil_adc)) reading.soil_adc = 0
+  if (!Number.isFinite(reading.pressure)) reading.pressure = 1013
+
+  return reading
+}
+
+const pushHistoryRow = (reading) => {
+  history.unshift({
+    time: new Date(reading.timestamp * 1000).toTimeString().slice(0, 8),
+    temp: `${reading.temperature}°C`,
+    hum: `${reading.humidity}%`,
+    soil: reading.soil_adc?.toString() ?? 'N/A',
+    pres: `${reading.pressure}hPa`
+  })
+
+  if (history.length > 10) {
+    history.splice(10)
+  }
+}
+
 const fetchLatest = async () => {
   const data = await AppStore.getLatest()
   if (data && Object.keys(data).length > 0) {
-    latestData.value = data
+    const normalized = normalizeReading(data)
+    if (normalized) {
+      latestData.value = normalized
+    }
   }
 }
 
@@ -250,16 +292,28 @@ const fetchHistory = async () => {
   if (data && data.length > 0) {
     history.length = 0
     // Show the most recent 10 readings
-    data.slice(-10).forEach(r => {
+    data.slice(-10).reverse().forEach(r => {
+      const normalized = normalizeReading(r)
+      if (!normalized) return
       history.push({
-        time: new Date(r.timestamp * 1000).toTimeString().slice(0, 8),
-        temp: `${r.temperature}°C`,
-        hum: `${r.humidity}%`,
-        soil: r.soil_adc?.toString() ?? 'N/A',
-        pres: `${r.pressure}hPa`
+        time: new Date(normalized.timestamp * 1000).toTimeString().slice(0, 8),
+        temp: `${normalized.temperature}°C`,
+        hum: `${normalized.humidity}%`,
+        soil: normalized.soil_adc?.toString() ?? 'N/A',
+        pres: `${normalized.pressure}hPa`
       })
     })
   }
+}
+
+const applyLivePayload = (topic, payload) => {
+  if (!topic || !LIVE_TOPICS.includes(topic)) return
+
+  const normalized = normalizeReading(payload)
+  if (!normalized) return
+
+  latestData.value = normalized
+  pushHistoryRow(normalized)
 }
 
 onMounted(() => {
@@ -272,15 +326,28 @@ onMounted(() => {
   
   fetchLatest()
   fetchHistory()
+
+  MqttStore.connect()
+  LIVE_TOPICS.forEach((topic) => MqttStore.subscribe(topic))
+
   dataTimer = setInterval(() => {
     fetchLatest()
     fetchHistory()
-  }, 10000)
+  }, 30000)
 })
 onUnmounted(() => {
   clearInterval(timer)
   clearInterval(dataTimer)
+  MqttStore.unsubcribeAll()
 })
+
+watch(
+  () => [MqttStore.payloadTopic, MqttStore.payload],
+  ([topic, payload]) => {
+    applyLivePayload(topic, payload)
+  },
+  { deep: true }
+)
 
 const filteredHistory = computed(() => {
   let list = [...history];

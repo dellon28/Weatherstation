@@ -34,13 +34,11 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
     const onConnected = (reconnect,URI)=> {
         // called when a connection is successfully made to the server. after a connect() method.
         console.log(`Connected to: ${URI} , Reconnect: ${reconnect}`);      
-        if(reconnect){
-            const topics = Object.keys(subTopics.value);
-            if(topics.length > 0 ){
-                topics.forEach((topic)=>{
-                    subscribe(topic);
-                })
-            }
+        const topics = Object.keys(subTopics.value);
+        if(topics.length > 0 ){
+            topics.forEach((topic)=>{
+                subscribe(topic);
+            })
         }
     }
  
@@ -99,10 +97,15 @@ export const useMqttStore =  defineStore('mqtt', ()=>{
 
     const subscribe = (topic) => {
         // Subscribe for messages, request receipt of a copy of messages sent to the destinations described by the filter.
-        // console.log(`MQTT: Subscribing to - ${topic}`);
+        subTopics.value[topic] = "pending";
+
+        if (!mqtt.value || !mqtt.value.isConnected?.()) {
+            return;
+        }
+
         try {
             var subscribeOptions = { onSuccess: sub_onSuccess, onFailure: sub_onFailure, invocationContext:{"topic":topic} }
-        mqtt.value.subscribe(topic,subscribeOptions);   
+            mqtt.value.subscribe(topic,subscribeOptions);   
         } catch (error) {
             console.log(`MQTT: Unable to Subscribe ${error} `);
         }

@@ -1,355 +1,425 @@
 <template>
-  <v-app class="lab-bg">
-    <!-- Lab Navigation -->
-    <v-app-bar flat class="bg-dark border-b-sm" density="compact" dark color="#1a1a1a">
-      <div class="px-4 d-flex align-center w-100">
-        <v-icon color="green" class="mr-2">mdi-transition-masked</v-icon>
-        <div class="pixel-font-sm text-green mr-6">IOT DIGITAL TWIN LAB <span class="version-tag">V3.0</span></div>
-        <v-spacer></v-spacer>
-        <div class="d-flex align-center mr-4">
-          <v-icon size="small" class="mr-2" :color="connected ? 'green' : 'red'">mdi-broadcast</v-icon>
-          <span class="pixel-font-xs text-white opacity-60 mr-2">MCU: ESP32-WROOM-32D</span>
-          <v-chip size="x-small" :color="connected ? 'green' : 'red'" label class="pixel-font-xs">
-            {{ connected ? 'LIVE_SYNC' : 'OFFLINE' }}
-          </v-chip>
+  <section class="lab-screen">
+    <div class="pixel-overlay"></div>
+
+    <div class="lab-layout">
+      <!-- Left Sidebar: System Diagnostics -->
+      <aside class="lab-sidebar">
+        <div class="pixel-card diag-card">
+          <div class="card-label">AIR TEMP</div>
+          <div class="diag-val">{{ fmt1(temperature) }}°C</div>
+          <div class="diag-sub">{{ tempStatus.label }}</div>
+          <div class="diag-bar"><div class="fill" :style="{ width: `${Math.min(100, Math.max(0, temperature * 2.4))}%` }"></div></div>
         </div>
-      </div>
-    </v-app-bar>
 
-    <v-main>
-      <v-container fluid class="pa-6">
-        <v-row>
-          <!-- Left Column: Virtual Environment Simulator -->
-          <v-col cols="12" md="7">
-            <v-card class="pixel-card-dark pa-0 overflow-hidden bg-black relative" style="height: 600px;">
-              <!-- Simulation Overlay Info -->
-              <div class="lab-header pa-4 d-flex justify-space-between align-start">
-                <div class="glass-hud pa-3">
-                  <div class="pixel-font-sm text-green mb-1">ENV_SIM_01: ACTIVE</div>
-                  <div class="d-flex gap-2">
-                    <div class="hud-stat">
-                      <div class="pixel-font-xs text-grey">TEMP</div>
-                      <div class="pixel-font-sm text-white">{{ temperature }}°C</div>
-                    </div>
-                    <div class="hud-stat">
-                      <div class="pixel-font-xs text-grey">VPD</div>
-                      <div class="pixel-font-sm text-white">1.2kPa</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="text-right glass-hud pa-3">
-                  <div class="pixel-font-xs text-blue">LATENCY: 42ms</div>
-                  <div class="pixel-font-xs text-orange">MCU_CORE: 240MHz</div>
-                </div>
+        <div class="pixel-card diag-card">
+          <div class="card-label">SOIL MOISTURE</div>
+          <div class="diag-val">{{ fmt1(soilMoisture) }}%</div>
+          <div class="diag-sub">{{ soilStatus.label }}</div>
+          <div class="diag-bar"><div class="fill wifi" :style="{ width: `${soilMoisture}%` }"></div></div>
+        </div>
+
+        <div class="pixel-card diag-card">
+          <div class="card-label">SYSTEM UPTIME</div>
+          <div class="diag-val">{{ uptime }}</div>
+          <div class="diag-sub">Packets: {{ packetCount }} | {{ packetRate }}/min | {{ lastSeenText }}</div>
+        </div>
+
+        <div class="pixel-card log-card">
+          <div class="card-label">WIRING SCHEMATICS</div>
+          <div class="schematic-list">
+            <div v-for="pin in pinout" :key="pin.gpio" 
+                 class="schematic-item" 
+                 :class="{ active: activeSensor === pin.sensor }"
+                 @mouseenter="activeSensor = pin.sensor">
+              <span class="pin-id">GPIO {{ pin.gpio }}</span>
+              <span class="pin-target">{{ pin.label }}</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center: The Digital Twin -->
+      <main class="lab-viewport">
+        <div class="viewport-header">
+          <div class="vp-title">PHYSICAL TWIN: ESP32-WROOM-32</div>
+          <div class="vp-status" :class="{ 'is-online': isOnline }">
+            {{ isOnline ? 'SYNCHRONIZED' : 'CONNECTION LOST' }}
+          </div>
+        </div>
+
+        <div class="twin-container">
+          <div class="esp32-model" :class="`focus-${activeSensor}`">
+            <div class="pcb-base">
+              <div class="mcu-chip">ESP32</div>
+              <div class="antenna"></div>
+              
+              <!-- Physical Pins -->
+              <div class="pin-header left">
+                <div v-for="i in 15" :key="'l'+i" class="pin-dot" :class="{ highlight: isPinActive('left', i) }"></div>
               </div>
-
-              <!-- 3D/Sprite Simulation Area -->
-              <div class="sim-container d-flex align-center justify-center">
-                <!-- Floating Sensor Data Tags -->
-                <div class="floating-data" :style="{ top: '30%', left: '25%' }">
-                  <div class="data-tag-line"></div>
-                  <div class="data-tag-box">
-                    <div class="pixel-font-xs text-blue">HUMIDITY</div>
-                    <div class="pixel-font-sm">{{ humidity }}%</div>
-                  </div>
-                </div>
-
-                <!-- Dynamic Weather Effects -->
-                <div :class="['weather-layer', { 'raining': humidity > 80, 'heat-wave': temperature > 30 }]">
-                  <div class="plant-platform">
-                    <!-- Scanner Beam Effect -->
-                    <div class="scanner-beam"></div>
-                    
-                    <img 
-                      src="C:\Users\dello\Desktop\ELET2415\Weatherstation\frontend\src\assets\flower.png" 
-                      alt="Digital Twin" 
-                      class="twin-sprite"
-                      :style="twinVisuals"
-                    />
-                    <!-- Holographic Circle Under Plant -->
-                    <div class="hologram-ring"></div>
-                  </div>
-                </div>
-                
-                <!-- Floor with Grid -->
-                <div class="lab-floor-grid"></div>
-              </div>
-
-              <!-- Simulation Controls -->
-              <div class="lab-footer pa-4">
-                <v-row align="center" no-gutters>
-                  <v-col cols="3">
-                    <div class="pixel-font-xs text-white">HISTORY_PLAYBACK</div>
-                  </v-col>
-                  <v-col cols="9">
-                    <v-slider
-                      v-model="simScrub"
-                      :max="100"
-                      step="1"
-                      color="green"
-                      track-color="grey-darken-3"
-                      hide-details
-                      prepend-icon="mdi-history"
-                      @update:model-value="simulateHistory"
-                    ></v-slider>
-                  </v-col>
-                </v-row>
-              </div>
-            </v-card>
-          </v-col>
-
-          <!-- Right Column: Hardware Interface & Diagnostics -->
-          <v-col cols="12" md="5">
-            <!-- ESP32 Board Map -->
-            <v-card class="pixel-card-dark pa-4 bg-dark-card mb-4">
-              <div class="pixel-font-sm text-white mb-4 border-b-green pb-2 d-flex justify-space-between">
-                <span>HARDWARE INTERFACE</span>
-                <span class="pixel-font-xs text-grey">REVISION: A2</span>
+              <div class="pin-header right">
+                <div v-for="i in 15" :key="'r'+i" class="pin-dot" :class="{ highlight: isPinActive('right', i) }"></div>
               </div>
               
-              <div class="esp32-visualizer mx-auto my-6">
-                <div class="mcu-body">
-                  <!-- Boot Button -->
-                  <div class="mcu-btn boot-btn"></div>
-                  <!-- RST Button -->
-                  <div class="mcu-btn rst-btn"></div>
-                  
-                  <div class="pins-left">
-                    <div v-for="n in 15" :key="'l'+n" :class="['pin', { 'pin-active': isPinActive('L', n), 'pin-pwr': n === 1 }]"></div>
-                  </div>
-                  <div class="chip-center d-flex flex-column align-center justify-center">
-                    <div class="mcu-logo"></div>
-                    <span class="pixel-font-xs" style="font-size: 6px; letter-spacing: 1px;">ESP32-WROOM</span>
-                    <!-- Status LED -->
-                    <div :class="['onboard-led', { 'blink': connected }]"></div>
-                  </div>
-                  <div class="pins-right">
-                    <div v-for="n in 15" :key="'r'+n" :class="['pin', { 'pin-active': isPinActive('R', n), 'pin-gnd': n === 15 }]"></div>
-                  </div>
-                </div>
-              </div>
+              <!-- Connection Traces (SVG) -->
+              <svg class="traces-layer" viewBox="0 0 200 280">
+                <path v-if="activeSensor === 'temp'" d="M190 100 L110 100" class="trace-line" />
+                <path v-if="activeSensor === 'soil'" d="M10 80 L60 80" class="trace-line" />
+                <path v-if="activeSensor === 'hum'" d="M10 200 L60 200" class="trace-line" />
+                <path v-if="activeSensor === 'pressure'" d="M190 220 L110 220" class="trace-line" />
+              </svg>
 
-              <!-- Pin Metadata -->
-              <div class="bg-black pa-4 rounded border-green">
-                <div class="d-flex justify-space-between mb-2">
-                  <span class="pixel-font-xs text-grey">GPIO 32 (ADC)</span>
-                  <div class="text-right">
-                    <div class="pixel-font-xs text-green">SOIL: {{ soilMoisture }}%</div>
-                    <div class="pixel-font-xs text-grey opacity-50">{{ (soilMoisture * 40.95).toFixed(0) }} RAW</div>
-                  </div>
-                </div>
-                <v-progress-linear :model-value="soilMoisture" color="green" height="4" class="mb-3"></v-progress-linear>
-                
-                <div class="d-flex justify-space-between mb-2">
-                  <span class="pixel-font-xs text-grey">GPIO 33 (I2C)</span>
-                  <span class="pixel-font-xs text-blue">DHT_BUS: 1.25V</span>
-                </div>
-                <v-progress-linear :model-value="humidity" color="blue" height="4"></v-progress-linear>
+              <!-- Data Overlays -->
+              <div class="data-node node-temp" @mouseenter="activeSensor = 'temp'">
+                <div class="node-line"></div>
+                <div class="node-label">TEMP: {{ fmt1(temperature) }}°C</div>
               </div>
-            </v-card>
+              <div class="data-node node-hum" @mouseenter="activeSensor = 'hum'">
+                <div class="node-line"></div>
+                <div class="node-label">HUM: {{ fmt1(humidity) }}%</div>
+              </div>
+              <div class="data-node node-soil" @mouseenter="activeSensor = 'soil'">
+                <div class="node-line"></div>
+                <div class="node-label">SOIL: {{ fmt1(soilMoisture) }}%</div>
+              </div>
+              <div class="data-node node-pres" @mouseenter="activeSensor = 'pressure'">
+                <div class="node-line"></div>
+                <div class="node-label">PRES: {{ fmt0(pressure) }} hPa</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-            <!-- MongoDB Live Stream -->
-            <v-card class="pixel-card-dark pa-4 bg-dark-card">
-              <div class="pixel-font-sm text-white mb-4 border-b-blue pb-2 d-flex justify-space-between">
-                <span>MONGODB_STREAM</span>
-                <v-icon size="x-small" color="blue">mdi-sync</v-icon>
+        <div class="viewport-footer">
+          <div class="tool-btn" @click="pingDevice">REBOOT</div>
+          <div class="tool-btn" @click="clearLogs">CLEAR</div>
+          <div class="tool-btn danger" @click="syncNow">SYNC</div>
+        </div>
+        <div class="cmd-status">
+          CMD: {{ commandState.action || 'IDLE' }} | {{ commandState.status }}
+          <span v-if="commandState.rttMs"> | RTT: {{ commandState.rttMs }}ms</span>
+        </div>
+      </main>
+
+      <!-- Right Sidebar: Configuration -->
+      <aside class="lab-config">
+        <div class="pixel-card config-card">
+          <div class="card-label">POLLING RATE</div>
+          <input type="range" min="1" max="60" v-model="pollRate" class="pixel-slider">
+          <div class="slider-val">{{ pollRate }} SECONDS</div>
+        </div>
+
+        <div class="pixel-card config-card">
+          <div class="card-label">HARDWARE HEALTH</div>
+          <div class="diag-sub">Link: <span :class="isOnline ? 'ok' : 'bad'">{{ isOnline ? 'ONLINE' : 'OFFLINE' }}</span></div>
+          <div class="diag-sub">Temp: {{ tempStatus.label }}</div>
+          <div class="diag-sub">Humidity: {{ humidityStatus.label }}</div>
+          <div class="diag-sub">Soil: {{ soilStatus.label }}</div>
+          <div class="diag-sub">Pressure: {{ pressureStatus.label }}</div>
+        </div>
+
+        <div class="pixel-card sensor-focus" v-if="activeSensor">
+          <div class="card-label">SIGNAL: {{ activeSensor.toUpperCase() }}</div>
+          <div class="focus-viz">
+            <svg viewBox="0 0 200 60" class="mini-chart">
+              <polyline fill="none" stroke="#4caf7d" stroke-width="2" :points="focusLinePoints" />
+            </svg>
+          </div>
+          <div class="focus-meta">GPIO: {{ currentPinInfo.gpio }} | {{ activeSensorValue }}</div>
+        </div>
+
+        <div class="pixel-card log-card">
+            <div class="card-label">LIVE LOGS</div>
+            <div class="log-terminal">
+              <div v-for="(log, i) in logs" :key="i" class="log-entry">
+                <span class="log-ts">[{{ log.time }}]</span> {{ log.msg }}
               </div>
-              <div class="console-box pa-2">
-                <div v-for="(log, idx) in logs" :key="idx" class="console-line">
-                  <span class="text-green">[{{ log.time }}]</span>
-                  <span class="text-white ml-2">{{ log.msg }}</span>
-                </div>
-                <div class="cursor-blink">_</div>
-              </div>
-            </v-card>
-          </v-col>
-        </v-row>
-      </v-container>
-    </v-main>
-  </v-app>
+            </div>
+          </div>
+      </aside>
+    </div>
+  </section>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useMqttStore } from '@/store/mqttStore'
+import { useAppStore } from '@/store/appStore'
 
-const connected = ref(true);
-const soilMoisture = ref(65);
-const temperature = ref(24.5);
-const humidity = ref(62);
-const simScrub = ref(100);
+const Mqtt = useMqttStore()
+const AppStore = useAppStore()
+const LIVE_TOPICS = ['620169500', '620169500_pub', '620169500_sub']
 
-const logs = ref([
-  { time: '14:20:01', msg: 'DB_INIT: MONGODB_ATLAS' },
-  { time: '14:20:05', msg: 'COLLECTION: SENSOR_READINGS' },
-  { time: '14:20:10', msg: 'ESP32_GPIO_ATTACH: 32, 33' }
-]);
+const isOnline = ref(false)
+const uptime = ref('00:00:00')
+const startedAt = ref(Date.now())
+const temperature = ref(0)
+const humidity = ref(0)
+const pressure = ref(1013.25)
+const soilMoisture = ref(0)
+const heatIndex = ref(0)
+const packetCount = ref(0)
+const lastPacketAt = ref(0)
+const pollRate = ref(5)
+const activeSensor = ref('temp')
+const logs = ref([])
+const sensorSeries = ref([])
+const commandState = ref({ action: '', status: 'idle', sentAt: 0, rttMs: 0 })
 
-const twinVisuals = computed(() => {
-  const scale = 0.6 + (soilMoisture.value / 150);
-  let filter = 'none';
-  if (soilMoisture.value < 30) filter = 'sepia(0.6) saturate(0.5) contrast(1.1)';
-  if (temperature.value > 30) filter = 'hue-rotate(330deg) brightness(1.3) drop-shadow(0 0 10px rgba(255,0,0,0.3))';
-  return { transform: `scale(${scale})`, filter: filter };
-});
+const toFinite = (value, fallback = 0) => {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+const fmt1 = (value) => toFinite(value, 0).toFixed(1)
+const fmt0 = (value) => toFinite(value, 0).toFixed(0)
+
+const resolveSoilPercent = (raw) => {
+  const direct = Number(raw?.soil ?? raw?.soil_moisture ?? raw?.soilPercent ?? raw?.soil_percent)
+  if (Number.isFinite(direct)) return Math.max(0, Math.min(100, direct))
+
+  const adc = Number(raw?.soil_adc ?? raw?.adc ?? NaN)
+  if (Number.isFinite(adc)) return Math.max(0, Math.min(100, ((4095 - adc) / 4095) * 100))
+
+  return 0
+}
+
+const normalizeReading = (raw) => {
+  if (!raw || typeof raw !== 'object') return null
+
+  return {
+    timestamp: toFinite(raw.timestamp, Math.floor(Date.now() / 1000)),
+    temperature: toFinite(raw.temperature, 0),
+    humidity: toFinite(raw.humidity, 0),
+    pressure: toFinite(raw.pressure, 1013.25),
+    soil: resolveSoilPercent(raw),
+  }
+}
+
+// Map your hardware pins here
+const pinout = [
+  { gpio: 32, label: 'Soil Moisture (ADC)', sensor: 'soil', side: 'left', index: 3 },
+  { gpio: 22, label: 'SCL (BMP280)', sensor: 'pressure', side: 'right', index: 12 },
+  { gpio: 21, label: 'SDA (BMP280)', sensor: 'temp', side: 'right', index: 4 },
+  { gpio: 4,  label: 'DHT Sensor', sensor: 'hum', side: 'left', index: 10 },
+]
 
 const isPinActive = (side, index) => {
-  if (side === 'L' && index === 6) return true; // Analog Soil
-  if (side === 'R' && index === 4) return true; // DHT
-  return false;
-};
+  const active = pinout.find(p => p.sensor === activeSensor.value)
+  return active && active.side === side && active.index === index
+}
 
-const simulateHistory = (val) => {
-  soilMoisture.value = Math.floor(20 + (val * 0.7));
-  temperature.value = Math.floor(18 + (val * 0.15));
-  humidity.value = Math.floor(30 + (val * 0.6));
-};
+const currentPinInfo = computed(() => pinout.find(p => p.sensor === activeSensor.value) || { gpio: 'N/A' })
+
+const tempStatus = computed(() => {
+  if (temperature.value < 18) return { label: 'LOW' }
+  if (temperature.value > 32) return { label: 'HIGH' }
+  return { label: 'OK' }
+})
+
+const humidityStatus = computed(() => {
+  if (humidity.value < 35) return { label: 'LOW' }
+  if (humidity.value > 75) return { label: 'HIGH' }
+  return { label: 'OK' }
+})
+
+const soilStatus = computed(() => {
+  if (soilMoisture.value < 35) return { label: 'DRY' }
+  if (soilMoisture.value > 85) return { label: 'WET' }
+  return { label: 'OPTIMAL' }
+})
+
+const pressureStatus = computed(() => {
+  if (pressure.value < 1000) return { label: 'LOW' }
+  if (pressure.value > 1025) return { label: 'HIGH' }
+  return { label: 'NORMAL' }
+})
+
+const pushLog = (msg) => {
+  logs.value.unshift({ time: new Date().toTimeString().split(' ')[0], msg })
+  if (logs.value.length > 20) logs.value.splice(20)
+}
+
+const applyReading = (reading, source = 'API') => {
+  const safe = normalizeReading(reading)
+  if (!safe) return
+
+  temperature.value = safe.temperature
+  humidity.value = safe.humidity
+  pressure.value = safe.pressure
+  soilMoisture.value = safe.soil
+  packetCount.value += 1
+  lastPacketAt.value = safe.timestamp
+  isOnline.value = true
+  sensorSeries.value.push({ ...safe })
+  if (sensorSeries.value.length > 30) sensorSeries.value.shift()
+
+  if (commandState.value.status === 'sent') {
+    commandState.value.status = 'ack'
+    commandState.value.rttMs = Date.now() - commandState.value.sentAt
+  }
+
+  pushLog(`${source}: Received packet`)
+}
+
+const fetchLatest = async () => {
+  const data = await AppStore.getLatest()
+  if (data) applyReading(data, 'REST')
+}
+
+const activeSensorValue = computed(() => {
+  const vals = { temp: temperature, hum: humidity, soil: soilMoisture, pressure: pressure }
+  const units = { temp: '°C', hum: '%', soil: '%', pressure: ' hPa' }
+  return `${fmt1(vals[activeSensor.value]?.value)}${units[activeSensor.value]}`
+})
+
+const lastSeenText = computed(() => {
+  if (!lastPacketAt.value) return 'No Link'
+  const delta = Math.floor(Date.now() / 1000) - lastPacketAt.value
+  return `${delta}s ago`
+})
+
+const packetRate = computed(() => {
+  const elapsedSec = Math.max(1, Math.floor((Date.now() - startedAt.value) / 1000))
+  return Math.round((packetCount.value * 60) / elapsedSec)
+})
+
+const focusLinePoints = computed(() => {
+  const values = sensorSeries.value.map(s => s[activeSensor.value === 'soil' ? 'soil' : activeSensor.value] || 0).slice(-12)
+  if (values.length < 2) return '0,30 200,30'
+  const min = Math.min(...values), range = Math.max(1, Math.max(...values) - min)
+  return values.map((v, i) => `${(i / (values.length - 1)) * 200},${55 - ((v - min) / range) * 50}`).join(' ')
+})
+
+let t1, t2
+const restartPolling = () => {
+  if (t2) clearInterval(t2)
+  const intervalMs = Math.max(1, Number(pollRate.value)) * 1000
+  t2 = setInterval(fetchLatest, intervalMs)
+}
 
 onMounted(() => {
-  setInterval(() => {
-    const now = new Date();
-    const timeStr = now.toTimeString().split(' ')[0];
-    const events = [
-      `POST_DOC: VWC_${soilMoisture.value}%`,
-      `SIGNAL_STRENGTH: -${Math.floor(Math.random()*20+50)}dBm`,
-      `ACK_RECV: PID_${Math.floor(Math.random()*9999)}`,
-      `BUFFER_SYNC: SUCCESS`
-    ];
-    logs.value.push({ time: timeStr, msg: events[Math.floor(Math.random()*events.length)] });
-    if (logs.value.length > 8) logs.value.shift();
-  }, 3500);
-});
+  Mqtt.connect()
+  LIVE_TOPICS.forEach(t => Mqtt.subscribe(t))
+  fetchLatest()
+  t1 = setInterval(() => {
+    uptime.value = new Date(Date.now() - startedAt.value).toISOString().substr(11, 8)
+    isOnline.value = (Date.now() / 1000 - lastPacketAt.value) < 15
+  }, 1000)
+  restartPolling()
+})
+
+watch(() => Number(pollRate.value), () => {
+  restartPolling()
+})
+
+watch(() => [Mqtt.payloadTopic, Mqtt.payload], ([topic, payload]) => {
+  const cleanTopic = String(topic ?? '').trim()
+  if (cleanTopic && LIVE_TOPICS.includes(cleanTopic)) applyReading(payload, 'MQTT')
+}, { deep: true })
+
+onUnmounted(() => {
+  clearInterval(t1)
+  clearInterval(t2)
+  LIVE_TOPICS.forEach((topic) => Mqtt.unsubcribe(topic))
+})
+
+const sendCommand = (action, payload = {}) => {
+  commandState.value = { action, status: 'sent', sentAt: Date.now(), rttMs: 0 }
+  Mqtt.publish('620169500_sub', JSON.stringify({ action, ...payload, timestamp: Math.floor(Date.now() / 1000) }))
+  pushLog(`CMD sent: ${action}`)
+}
+
+const pingDevice = () => sendCommand('reboot')
+const syncNow = async () => {
+  sendCommand('sync')
+  await fetchLatest()
+}
+const clearLogs = () => logs.value = []
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-
-.lab-bg { background-color: #080808 !important; }
-.bg-dark { background-color: #121212 !important; }
-.bg-dark-card { background-color: #0f0f0f !important; }
-.version-tag { font-size: 8px; vertical-align: super; opacity: 0.5; margin-left: 4px; }
-
-.pixel-font-sm { font-family: 'Press Start 2P', cursive; font-size: 0.7rem; }
-.pixel-font-xs { font-family: 'Press Start 2P', cursive; font-size: 0.5rem; }
-
-.pixel-card-dark {
-  border: 2px solid #2a2a2a !important;
-  border-radius: 0 !important;
-  box-shadow: 0 0 20px rgba(0, 255, 100, 0.03);
+.lab-screen {
+  min-height: 100vh; padding-top: 64px;
+  font-family: 'Press Start 2P', monospace;
+  background: #0a0a0a; color: #4caf7d;
 }
 
-.border-green { border: 1px solid #2ecc71; }
-.text-green { color: #2ecc71; }
-.text-blue { color: #3498db; }
-.text-orange { color: #e67e22; }
-
-/* Simulation HUD Elements */
-.glass-hud {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+.pixel-overlay {
+  position: absolute; inset: 0; pointer-events: none; z-index: 10;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.1) 0, rgba(0,0,0,0.1) 1px, transparent 1px, transparent 3px);
 }
 
-.hud-stat { border-left: 2px solid #2ecc71; padding-left: 8px; margin-top: 4px; }
-
-.floating-data {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  pointer-events: none;
-  z-index: 100;
-}
-.data-tag-line { width: 40px; height: 1px; background: #3498db; transform: rotate(-45deg); transform-origin: left; }
-.data-tag-box { background: rgba(0,0,0,0.8); border: 1px solid #3498db; padding: 4px 8px; }
-
-/* Simulation Area */
-.sim-container {
-  height: 100%;
-  position: relative;
-  background: radial-gradient(circle at center, #151a15 0%, #000 100%);
-  overflow: hidden;
+.lab-layout {
+  display: grid; grid-template-columns: 280px 1fr 280px;
+  height: calc(100vh - 64px); gap: 10px; padding: 10px;
 }
 
-.lab-floor-grid {
-  position: absolute; bottom: 0; width: 100%; height: 120px;
-  background-image: 
-    linear-gradient(rgba(46, 204, 113, 0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(46, 204, 113, 0.1) 1px, transparent 1px);
-  background-size: 30px 30px;
-  transform: perspective(100px) rotateX(45deg);
-  transform-origin: center bottom;
+.pixel-card { background: #151515; border: 2px solid #333; padding: 12px; margin-bottom: 10px; }
+.card-label { font-size: 8px; color: #666; margin-bottom: 8px; }
+
+/* ── Schematic List ── */
+.schematic-item { font-size: 7px; padding: 6px; border-left: 2px solid #333; margin-bottom: 4px; display: flex; justify-content: space-between; cursor: pointer; }
+.schematic-item.active { border-color: #4caf7d; background: #4caf7d22; color: #fff; }
+.pin-id { color: #888; }
+
+/* ── ESP32 Model ── */
+.lab-viewport { background: #000; border: 2px solid #4caf7d33; display: flex; flex-direction: column; position: relative; }
+.twin-container { flex: 1; display: flex; align-items: center; justify-content: center; perspective: 800px; }
+
+.esp32-model {
+  width: 200px; height: 280px; background: #1b4d3e;
+  border: 4px solid #14362d; border-radius: 6px;
+  position: relative; transform: rotateX(15deg) rotateZ(-5deg);
+  transition: transform 0.5s ease;
 }
 
-.scanner-beam {
-  position: absolute; top: 0; left: 0; width: 100%; height: 4px;
-  background: rgba(46, 204, 113, 0.4);
-  box-shadow: 0 0 15px #2ecc71;
-  animation: scan-loop 3s ease-in-out infinite;
-  z-index: 15;
-}
-@keyframes scan-loop { 0%, 100% { top: 20%; opacity: 0; } 50% { top: 80%; opacity: 1; } }
-
-.twin-sprite { width: 160px; image-rendering: pixelated; z-index: 5; transition: all 1s ease; }
-.hologram-ring {
-  position: absolute; bottom: -30px; width: 140px; height: 50px;
-  background: radial-gradient(ellipse at center, rgba(46, 204, 113, 0.2) 0%, transparent 80%);
-  border: 1px solid rgba(46, 204, 113, 0.4);
-  border-radius: 50%;
-  transform: rotateX(70deg);
-  animation: rotate-ring 6s linear infinite;
+.mcu-chip {
+  position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+  width: 80px; height: 80px; background: #222; border: 2px solid #444;
+  display: flex; align-items: center; justify-content: center; font-size: 8px; color: #666;
 }
 
-@keyframes rotate-ring { 0% { transform: rotateX(70deg) rotateZ(0deg); } 100% { transform: rotateX(70deg) rotateZ(360deg); } }
+.pin-header { position: absolute; top: 40px; bottom: 20px; width: 14px; display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.pin-header.left { left: 4px; }
+.pin-header.right { right: 4px; }
+.pin-dot { height: 8px; background: #333; border: 1px solid #000; transition: 0.3s; }
+.pin-dot.highlight { background: #ffd700; box-shadow: 0 0 8px #ffd700; transform: scale(1.2); }
 
-/* ESP32 Hardware Styles */
-.esp32-visualizer {
-  width: 200px; height: 260px;
-  background: #1e272e; border: 4px solid #3d464d;
-  padding: 10px; position: relative;
+.traces-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.trace-line { fill: none; stroke: #ffd700; stroke-width: 2; stroke-dasharray: 4; animation: flow 1s linear infinite; }
+
+@keyframes flow { to { stroke-dashoffset: -8; } }
+
+/* ── Nodes ── */
+.data-node { position: absolute; cursor: pointer; z-index: 5; }
+.node-line { width: 40px; height: 2px; background: #4caf7d; margin-bottom: 4px; transition: 0.3s; }
+.node-label { background: #4caf7d; color: #000; font-size: 7px; padding: 4px; border: 1px solid #000; }
+.data-node:hover .node-line { width: 60px; background: #fff; }
+
+.node-temp { top: 90px; right: -80px; }
+.node-hum { bottom: 80px; left: -80px; }
+.node-soil { top: 50px; left: -90px; }
+.node-pres { bottom: 40px; right: -95px; }
+
+/* ── Footer ── */
+.viewport-footer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #4caf7d22; }
+.tool-btn { font-size: 7px; padding: 6px; border: 1px solid #4caf7d; cursor: pointer; }
+.tool-btn:hover { background: #4caf7d; color: #000; }
+
+.cmd-status {
+  border-top: 1px solid #4caf7d22;
+  padding: 8px 12px;
+  font-size: 7px;
+  color: #9ad9b1;
 }
 
-.mcu-body { height: 100%; display: flex; justify-content: space-between; position: relative; }
+.ok { color: #4caf7d; }
+.bad { color: #e05c5c; }
 
-.mcu-btn { position: absolute; width: 12px; height: 12px; background: #57606f; border: 1px solid #7f8c8d; border-radius: 2px; }
-.boot-btn { bottom: 5px; left: 20px; }
-.rst-btn { bottom: 5px; right: 20px; }
-
-.pins-left, .pins-right { display: flex; flex-direction: column; justify-content: space-between; height: 90%; }
-.pin { width: 12px; height: 4px; background: #485460; }
-.pin-active { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
-.pin-pwr { background: #e74c3c; }
-.pin-gnd { background: #34495e; }
-
-.chip-center {
-  flex-grow: 1; margin: 20px 15px;
-  background: #2d3436; border: 1px solid #485460;
-  color: white; position: relative;
-}
-
-.onboard-led { width: 6px; height: 6px; background: #3d464d; position: absolute; top: 10px; right: 10px; }
-.onboard-led.blink { background: #3498db; box-shadow: 0 0 5px #3498db; animation: led-blink 0.5s infinite; }
-@keyframes led-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-/* Console Box */
-.console-box {
-  background: #000; height: 180px; overflow: hidden;
-  font-family: 'Courier New', monospace; font-size: 10px; border: 1px solid #222;
-}
-.console-line { margin-bottom: 4px; border-left: 2px solid #2ecc71; padding-left: 8px; line-height: 1.4; }
-.cursor-blink { display: inline-block; width: 8px; height: 12px; background: #2ecc71; animation: blink 1s step-end infinite; }
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-/* Weather Effects */
-.raining::before {
-  content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  background: repeating-linear-gradient(0deg, transparent, transparent 30px, rgba(52, 152, 219, 0.1) 31px);
-  animation: rain-drop 0.3s linear infinite; z-index: 10;
-}
-@keyframes rain-drop { from { background-position: 0 0; } to { background-position: 0 60px; } }
-
-.heat-wave::after {
-  content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(255, 100, 0, 0.05); animation: heat-shimmer 1s ease-in-out infinite; z-index: 10;
-}
-@keyframes heat-shimmer { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.3; } }
+.log-terminal { height: 120px; background: #000; font-size: 6px; padding: 6px; overflow-y: auto; border: 1px solid #333; }
+.log-ts { color: #666; }
+.pixel-slider { width: 100%; accent-color: #4caf7d; }
+.mini-chart { background: #000; border: 1px solid #333; margin-top: 8px; }
 </style>
