@@ -188,6 +188,7 @@ const soilMoisture = ref(0);
 const temperature = ref(0);
 const humidity = ref(0);
 const pressure = ref(1013.25);
+const readings = ref([]);
 
 const fetchLatest = async () => {
   const data = await AppStore.getLatest()
@@ -198,6 +199,46 @@ const fetchLatest = async () => {
     soilMoisture.value = data.soil_adc ?? 0
   }
 }
+
+const toUnixSeconds = (dateValue, endOfDay = false) => {
+  if (!dateValue) return null;
+  const date = endOfDay
+    ? new Date(`${dateValue}T23:59:59`)
+    : new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.floor(date.getTime() / 1000);
+};
+
+const soilAdcToPercent = (adc) => {
+  const raw = Number(adc ?? 0);
+  return Math.max(0, Math.min(100, ((4095 - raw) / 4095) * 100));
+};
+
+const fetchAnalysisData = async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const startTs = toUnixSeconds(start.value) ?? 0;
+  const endTs = toUnixSeconds(end.value, true) ?? now;
+
+  const safeStart = Math.min(startTs, endTs);
+  const safeEnd = Math.max(startTs, endTs);
+
+  const data = await AppStore.getAllInRange(safeStart, safeEnd);
+  readings.value = Array.isArray(data)
+    ? [...data].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+    : [];
+
+  if (readings.value.length > 0) {
+    const latest = readings.value[readings.value.length - 1];
+    temperature.value = Number(latest.temperature ?? 0);
+    humidity.value = Number(latest.humidity ?? 0);
+    pressure.value = Number(latest.pressure ?? 1013.25);
+    soilMoisture.value = soilAdcToPercent(latest.soil_adc);
+    return;
+  }
+
+  await fetchLatest();
+  soilMoisture.value = soilAdcToPercent(soilMoisture.value);
+};
 
 // Converters
 const convertTemp = (val, unit) => {
@@ -288,6 +329,30 @@ const initThreeJS = () => {
 };
 
 const initCharts = () => {
+  const soilSeries = readings.value.map((r) => [
+    Number(r.timestamp ?? 0) * 1000,
+    soilAdcToPercent(r.soil_adc)
+  ]);
+  const heatSeries = readings.value.map((r) => {
+    const t = Number(r.temperature ?? 0);
+    const h = Number(r.humidity ?? 0);
+    return [Number(r.timestamp ?? 0) * 1000, convertTemp(calculateHeatIndexC(t, h), heatUnit.value)];
+  });
+  const tempSeries = readings.value.map((r) => [
+    Number(r.timestamp ?? 0) * 1000,
+    convertTemp(Number(r.temperature ?? 0), tempUnit.value)
+  ]);
+  const humidSeries = readings.value.map((r) => [
+    Number(r.timestamp ?? 0) * 1000,
+    Number(r.humidity ?? 0)
+  ]);
+  const pressureSeries = readings.value.map((r) => {
+    const p = Number(r.pressure ?? 1013.25);
+    if (pressureUnit.value === 'inHg') return [Number(r.timestamp ?? 0) * 1000, p * 0.02953];
+    if (pressureUnit.value === 'psi') return [Number(r.timestamp ?? 0) * 1000, p * 0.0145038];
+    return [Number(r.timestamp ?? 0) * 1000, p];
+  });
+
   Highcharts.chart('soilHeatChart', {
     chart: { type: 'line', backgroundColor: 'transparent', style: { fontFamily: 'Courier New' } },
     title: { text: null },
@@ -295,8 +360,8 @@ const initCharts = () => {
     yAxis: [{ title: { text: 'MOISTURE (%)' } }, { title: { text: `HEAT (${heatUnit.value})` }, opposite: true }],
     credits: { enabled: false },
     series: [
-      { name: 'Soil Moisture', data: [[Date.now() - 3600000, 60], [Date.now(), soilMoisture.value]], color: '#5B9EF0' },
-      { name: 'Heat Index', yAxis: 1, data: [[Date.now() - 3600000, convertTemp(26, heatUnit.value)], [Date.now(), parseFloat(displayHeatIndex.value)]], color: '#E0A020' }
+      { name: 'Soil Moisture', data: soilSeries, color: '#5B9EF0' },
+      { name: 'Heat Index', yAxis: 1, data: heatSeries, color: '#E0A020' }
     ]
   });
 
@@ -307,8 +372,8 @@ const initCharts = () => {
     yAxis: [{ title: { text: `TEMP (${tempUnit.value})` } }, { title: { text: 'HUMIDITY (%)' }, opposite: true }],
     credits: { enabled: false },
     series: [
-      { name: 'Air Temp', data: [[Date.now() - 3600000, convertTemp(22, tempUnit.value)], [Date.now(), parseFloat(displayTemp.value)]], color: '#E05C5C' },
-      { name: 'Humidity', yAxis: 1, data: [[Date.now() - 3600000, 55], [Date.now(), humidity.value]], color: '#5B9EF0' }
+      { name: 'Air Temp', data: tempSeries, color: '#E05C5C' },
+      { name: 'Humidity', yAxis: 1, data: humidSeries, color: '#5B9EF0' }
     ]
   });
 
@@ -320,20 +385,22 @@ const initCharts = () => {
     credits: { enabled: false },
     series: [{ 
       name: 'Atmospheric Pressure', 
-      data: [[Date.now() - 3600000, parseFloat(displayPressure.value) * 0.998], [Date.now(), parseFloat(displayPressure.value)]], 
+      data: pressureSeries, 
       color: '#9B6ECF' 
     }]
   });
 };
 
 watch([tempUnit, pressureUnit, humidUnit, heatUnit], () => initCharts());
-const performAnalysis = () => initCharts();
+const performAnalysis = async () => {
+  await fetchAnalysisData();
+  initCharts();
+};
 
 onMounted(() => {
   initThreeJS();
-  initCharts();
   Mqtt.connect();
-  fetchLatest();
+  performAnalysis();
 });
 
 onBeforeUnmount(() => {

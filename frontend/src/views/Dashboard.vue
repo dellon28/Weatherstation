@@ -244,10 +244,12 @@ const fetchLatest = async () => {
 
 const fetchHistory = async () => {
   const now = Math.floor(Date.now() / 1000)
-  const dayAgo = now - 86400
-  const data = await AppStore.getAllInRange(dayAgo, now)
+  // Fetch all available data by using year 2000 as start
+  const allTimeStart = 946684800 // Jan 1, 2000
+  const data = await AppStore.getAllInRange(allTimeStart, now)
   if (data && data.length > 0) {
     history.length = 0
+    // Show the most recent 10 readings
     data.slice(-10).forEach(r => {
       history.push({
         time: new Date(r.timestamp * 1000).toTimeString().slice(0, 8),
